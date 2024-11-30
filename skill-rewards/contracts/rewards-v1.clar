@@ -1,5 +1,5 @@
 ;; Learning Rewards System Smart Contract
-;; Author: Your Name
+;; Author: Oluwaseun
 ;; Description: A comprehensive system for managing learning achievements and rewards
 
 ;; Constants
@@ -11,6 +11,7 @@
 (define-constant ERR_TIMELOCK_NOT_EXPIRED (err u104))
 (define-constant ERR_ALREADY_CLAIMED (err u105))
 (define-constant ERR_NOT_COMPLETED (err u106))
+(define-data-var last-achievement-id uint u0)
 
 ;; Define the reward token
 (define-fungible-token skill-token)
@@ -55,6 +56,12 @@
     }
 )
 
+;; Authorized Reviewers Map
+(define-map authorized-reviewers 
+    { reviewer: principal } 
+    { authorized: bool }
+)
+
 ;; Administrative Functions
 
 (define-public (create-achievement (name (string-ascii 64))
@@ -66,21 +73,20 @@
                                  (max-submissions uint))
     (begin
         (asserts! (is-eq tx-sender CONTRACT_OWNER) ERR_NOT_AUTHORIZED)
-        (let ((achievement-id (+ u1 (default-to u0 (get-last-achievement-id)))))
-            (map-set achievements
-                { achievement-id: achievement-id }
-                {
-                    name: name,
-                    description: description,
-                    reward-amount: reward-amount,
-                    timelock-period: timelock-period,
-                    prerequisites: prerequisites,
-                    required-evidence: required-evidence,
-                    max-submissions: max-submissions
-                }
-            )
-            (ok achievement-id)
+        (var-set last-achievement-id (+ (var-get last-achievement-id) u1))
+        (map-set achievements
+            { achievement-id: (var-get last-achievement-id) }
+            {
+                name: name,
+                description: description,
+                reward-amount: reward-amount,
+                timelock-period: timelock-period,
+                prerequisites: prerequisites,
+                required-evidence: required-evidence,
+                max-submissions: max-submissions
+            }
         )
+        (ok (var-get last-achievement-id))
     )
 )
 
@@ -192,10 +198,20 @@
     )
 )
 
+(define-public (set-authorized-reviewer (reviewer principal) (authorized bool))
+    (begin
+        (asserts! (is-eq tx-sender CONTRACT_OWNER) ERR_NOT_AUTHORIZED)
+        (ok (map-set authorized-reviewers 
+            { reviewer: reviewer }
+            { authorized: authorized }))
+    )
+)
+
 ;; Helper Functions
 
 (define-private (is-authorized-reviewer (reviewer principal))
-    (default-to false (get-authorized-reviewer reviewer))
+    (default-to false (get authorized 
+        (map-get? authorized-reviewers { reviewer: reviewer })))
 )
 
 (define-private (check-prerequisites (user principal) (prerequisites (list 5 uint)))
@@ -230,8 +246,8 @@
     )
 )
 
-(define-private (calculate-new-rank (achievements uint) (rewards uint))
-    (if (>= achievements u10)
+(define-private (calculate-new-rank (achievement-count uint) (rewards uint))
+    (if (>= achievement-count u10)
         (if (>= rewards u10000)
             "expert"
             "intermediate")
@@ -239,7 +255,7 @@
 )
 
 (define-private (get-last-achievement-id)
-    (fold check-achievement-id (sequence "uint" u1 u1000) none)
+    (ok (var-get last-achievement-id))
 )
 
 (define-private (check-achievement-id (id uint) (last-id (optional uint)))
